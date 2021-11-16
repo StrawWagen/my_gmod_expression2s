@@ -1,0 +1,120 @@
+@name automatic respawn manager
+@inputs 
+@outputs 
+@persist 
+@trigger 
+
+#saves respawnpoints whenever someone has their armour increase
+#when ppl die they get placed at these points
+
+#ifdef entity:plySetPos( vector )
+
+if ( duped() ) {
+    reset()
+}
+
+if ( first() | clk( "respawncheck" ) ) {
+    if ( first() ) {
+        if ( !owner():isAdmin() ) {
+            error( "[ Respawn manager ]; Running :isAdmin() on you returned false... Shutting down!" )
+        }
+        runOnSpawn( 1 )
+        runOnDeath( 1 )
+    }
+    
+    timer( "respawncheck", 1000 )
+    
+    local Players = players()
+    
+    for ( I = 1, Players:count() ) {
+        CurrPly = Players[I,entity] 
+        CurrArmor = CurrPly:armor()
+        if ( CurrArmor != CurrPly["oldrespawnarmor",number] ) {
+            
+            local IsOnGround = CurrPly:isOnGround()
+            local IncreasedArmor = CurrArmor > CurrPly["oldrespawnarmor",number]
+            local Respawning = CurrPly["e2respawning",number]
+            local IsAlive = CurrPly:isAlive()
+            
+            local ValidNewSpawn = IsOnGround & IncreasedArmor & !Respawning & IsAlive
+            
+            if ( ValidNewSpawn ) {
+                CurrPly["respawnpos",vector] = CurrPly:pos() + vec( 0,0,10 )
+                CurrPly["respawnsavedarmour",number] = CurrArmor
+                CurrPly["respawnsavedhealth",number] = CurrPly:health()
+            }
+            
+            CurrPly["oldrespawnarmor",number] = CurrArmor
+        }
+    }
+}
+
+
+if ( spawnClk() ) {
+    local Spawned = lastSpawnedPlayer()
+    local SpawnedPos = Spawned["respawnpos",vector]
+    
+    if ( SpawnedPos != vec() ) {
+        Spawned["bailpos",vector] = Spawned:pos()
+        Spawned["respawntime",number] = curtime() + 5
+        Spawned["e2respawning",number] = 1
+        timer( "smartrespawn!" + Spawned:id(), 100 )
+    }
+}
+
+local CustTimer = clkName()
+if ( CustTimer != "" ) { 
+    if ( CustTimer:find("smartrespawn") ) {
+        local Needle = CustTimer:find( "!" )
+        local Find = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Find ) {
+            
+            local Pos = Find:pos()
+            local RespawnPos = Find["respawnpos",vector]
+            
+            local StillTime = curtime() < Find["respawntime",number]
+            local Bail = 0
+            local BailMsg = ""
+            
+            if ( Pos:distance( RespawnPos ) < 100 ) {
+                Find:plySetHealth( Find["respawnsavedhealth",number] )
+                Find:plySetArmor( Find["respawnsavedarmour",number] )
+                Find:plyGod(1)
+                Find["e2respawning",number] = 0
+                
+                timer( "godmodedisable!" + Find:id(), 2000 )
+                
+            }
+            elseif ( StillTime ) {
+                Find:plySetPos( RespawnPos )
+                timer( "smartrespawn!" + Find:id(), 100 )
+            }
+            elseif ( Pos:distance( vec() ) < 100 ) {
+                Bail = 1
+                BailMsg = "[ Respawn manager ]; Smart respawn cancelled because of malformed spawnpos."
+            }
+            elseif ( !StillTime ) {
+                Bail = 1
+                BailMsg = "[ Respawn manager ]; Smart respawn timed out after too many attempts."
+            }
+            if ( Bail ) {
+                Find:plySetPos( Find["bailpos",vector] )
+                Find:sendMessage( BailMsg )
+                Find["e2respawning",number] = 0
+            }
+        }
+    }
+    if ( CustTimer:find("godmodedisable") ) {
+        local Needle = CustTimer:find( "!" )
+        local Find = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Find ) {
+            Find:plyGod(0)
+        }
+    }
+}
+
+#else
+
+error( "E2 extension, PlayerCore, is missing... Disabling!" )
