@@ -1,0 +1,66 @@
+@name checkpoint setter
+@inputs Ent:entity Entites:array
+@outputs 
+@persist 
+@trigger
+
+#ifdef runOnSpawn(number)
+#else 
+    error("Critical e2 extension, PlyCore, is missing/disabled!")
+#endif
+
+if ( duped() ) {
+    reset()
+}
+
+if ( first() ) {
+    
+    runOnSpawn( 1 )
+    
+    function entity:setSpawn( Spawn:entity ) {
+        if ( This:isPlayer() ) {
+            This["currcheckpoint",entity] = Spawn
+        }
+    }
+    function number entity:checkSpawned( Spawn:entity ) {
+        local Out = 0
+        if ( This["currcheckpoint",entity] == Spawn & This:isPlayer() ) {
+            Out = 1
+        }
+        return Out
+    }
+    function entity:doSpawn( Pos:vector ) {
+        if ( This:isPlayer() ) {
+            This:plySetPos( Pos )
+        }
+    }
+}
+
+if ( changed( Ent ) | changed( Entites:count() ) ) {
+    EntInt = Ent ? Ent : Entites[1,entity]
+    if ( EntInt ) {
+        EntInt:setSpawn( entity() )
+        
+    }
+}
+
+if ( spawnClk() ) {
+    local Spawned = lastSpawnedPlayer()
+    local Valid = Spawned:checkSpawned( entity() ) 
+    if ( Valid ) {
+        timer( "dospawn!" + Spawned:id(), 20 )
+    }
+}
+    
+local CustTimer = clkName()
+if ( CustTimer:find("dospawn") ) {
+    local Needle = CustTimer:find( "!" )
+    local Find = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+    
+    if ( Find ) {
+        Find:doSpawn( entity():pos() + vec( 0, 0, 10 ) )
+    }
+}
+    
+    
+    
