@@ -1,0 +1,208 @@
+@name custom_soundscape_manager
+@inputs 
+@outputs 
+@persist Max [ DonePlys DoneSpeakers ]:array Delay [ E2 ]:entity
+@trigger 
+#[
+##HOW USE?
+
+STEP1 create wire constant value with correct structure!!!
+    correct structure is as follows
+    1:Sound Path
+    2:Sound Enable Dist
+    3:Sound Volume
+    4:Sound Pitch
+    5:Sound exists in space
+        
+STEP2 run concmd 'wire_value_model models/bull/various/speaker.mdl'
+SPAWN VALUE!!!!
+
+#if input 5 is not set, then sounds will play ON the player, making it seem like they come from everywhere
+#if input 5 is set, then sounds will come from the emitter
+
+#when u get closer than the distance, the sound will fade in
+#sound entities that are in the open will not care about line of sight as much
+#sound ents with not ambient will play from their position
+]#
+
+if ( duped() ) {
+    reset()
+}
+if ( first() ) {
+    function debugRing( Pos:vector, Color:vector4, Radius, Time ) {
+        local Id = randint( 100, 5657741212 )
+        local Holo = holoCreate( Id, Pos )
+        holoModel( Id, "models/hunter/tubes/tube2x2x025.mdl" )
+        holoMaterial( Id, "models/debug/debugwhite" )
+        holoDisableShading( Id, 1 )
+        holoColor( Id, Color )
+        holoScaleUnits( Id, vec( Radius * 2, Radius * 2, 2 ) )
+        #print( Holo:toString() + Holo:getColor() + Holo:getMaterial() )
+        timer( "holodelete!" + Holo:id(), Time )
+    }
+    function number posCanSee( Pos1:vector, Pos2:vector ) {
+        rangerWhitelist(1)
+        rangerFilter( world() )
+        local Ranger = rangerOffset( Pos1, Pos2 )
+        
+        return !Ranger:hitWorld()
+    }
+    Max = 700
+}
+
+if ( first() | clk( "identify" ) ) {
+    timer( "identify", 15000 )
+
+    findClearBlackList()
+    findClearWhiteList()
+    findByClass( "player" )
+    findClipToEntities( players() )
+    findClipFromEntities( DonePlys )
+    local Players = findToArray()
+    
+    for ( I = 1, Players:count() ) {
+        local Curr = Players[I,entity]
+        DonePlys:pushEntity( Curr )
+        timer( "soundthink!" + Curr:id(), 100 )
+        
+    }
+    
+    findClearBlackList()
+    findClearWhiteList()
+    findByModel( "models/bull/various/speaker.mdl" )
+    findClipFromEntities( DoneSpeakers )
+    local Speakers = findToArray()
+    for ( I = 1, Speakers:count() ) {
+        local Curr = Speakers[I,entity]
+        DoneSpeakers:pushEntity( Curr )
+        Curr["speakercolour",vector] = randvec( 0, 1 ) * 255
+        #print( Curr["speakercolour",vector] )
+        Curr:setColor( Curr["speakercolour",vector] )
+        timer( "speakerthink!" + Curr:id(), randint( 100, 1000 ) )
+        
+    }
+}
+
+local CustTimer = clkName()
+if ( CustTimer != "" ) { 
+    if ( CustTimer:find("speakerthink") ) {
+        local Needle = CustTimer:find( "!" )
+        local Me = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Me ) {
+            local Time = 2000 + randint( -15, 15 )
+            if ( owner():inNoclip() & !owner():inVehicle() ) {
+                local Link = Me["wirelink"+E2:id(),wirelink]
+                debugRing( Me:pos(), vec4( Me["speakercolour",vector], 30 ), Link["2",number], Time + 100 )
+                if ( Me["status",number] != 1 ) {
+                    Me["status",number] = 1
+                    Me:setMaterial( "" )
+                    #ifdef entity:setSubMaterial( number,string )
+                    Me:setSubMaterial( 2, "lights/white001" )
+                    #endif
+                    Me:propNotSolid(0)
+                }
+            }
+            else {
+                if ( Me["status",number] != 2 ) {
+                    Me["status",number] = 2
+                    Me:setMaterial( "models/blackout/blackout" )
+                    Me:propNotSolid(1)
+                }
+            }
+            if ( Time ) {
+                timer( "speakerthink!" + Me:id(), Time )
+            }
+        }
+    }
+    if ( CustTimer:find("soundthink") ) {
+        local Needle = CustTimer:find( "!" )
+        local Me = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Me ) {
+            local Cur = curtime()
+            local Time = 1000
+            findByModel( "models/bull/various/speaker.mdl" )
+            local Speakers = findToArray()
+            for ( I = 1, Speakers:count() ) {
+                local Curr = Speakers[I,entity]
+                local AmbId = "ambient" + Curr:id()
+                local Link = Curr["wirelink"+E2:id(),wirelink]
+                if ( !Link ) {
+                    Link = Curr:wirelink()
+                    Curr["wirelink"+E2:id(),wirelink] = Link
+                    
+                }
+                local TrigDist = Link["2",number]
+                local Dist = Curr:pos():distance( Me:pos() )
+                local PlyKey = Me:id()
+                if ( Curr["nextaction"+PlyKey,number] < Cur ) { #dont do stuff too fast, so that the sounds dont break
+                    if ( Dist < TrigDist ) {
+                        local RPos = Me:attachmentPos( "eyes" )
+                        local UnderSky = 0
+                        if ( Curr["isundersky",number] ) {
+                            rangerHitEntities(0)
+                            local SkyR = rangerOffset( 2000, RPos, vec( 0,0,1 ) )
+                            UnderSky = SkyR:hitSky() | ( !SkyR:hitSky() & !SkyR:hit() )
+                            
+                        }
+                        local CanSee = posCanSee( Curr:pos(), RPos )
+                        local VolMul = CanSee | UnderSky ? 1 : 0.2
+                        local Volume = Link["3",number] * VolMul
+                        if ( !Curr["establishedsky",number] | Curr["nextskycheck",number] < Cur ) {
+                            Curr["establishedsky",number] = 1
+                            Curr["nextskycheck",number] = Cur + 15
+                            rangerHitEntities(0)
+                            local SkyR2 = rangerOffset( 2000, Curr:pos(), vec( 0,0,1 ) )
+                            Curr["isundersky",number] = SkyR2:hitSky() | ( !SkyR2:hitSky() & !SkyR2:hit() )
+                            
+                        }
+                        local SndOrigin = Link["5",number] ? Curr : Me #if 5 then play the sound from ent's point in space, not my pos
+                        if ( !Curr["playing"+PlyKey,number] ) {
+                            local Path = Link["1",string]
+                            local Pitch = Link["4",number]
+                            
+                            Curr["playing"+PlyKey,number] = 1
+                            Curr["nextaction"+PlyKey,number] = Cur + 1.1
+                            SndOrigin:soundPlay( AmbId, 0, Path )
+                            soundVolume( AmbId, 0 )
+                            soundVolume( AmbId, Volume, 1 )
+                            Curr["oldvolume"+PlyKey,number] = 0
+                            soundPitch( AmbId, Pitch )
+                            
+                        }
+                        if ( Volume != Curr["oldvolume"+PlyKey,number] ) {
+                            soundVolume( AmbId, Volume, 0.2 )
+                            Curr["nextaction"+PlyKey,number] = Cur + 0.25
+                            Curr["oldvolume"+PlyKey,number] = Volume
+                            
+                        }
+                    }
+                    elseif ( Dist >= TrigDist ) {
+                        if ( Curr["playing"+PlyKey,number] ) {
+                            Curr["playing"+PlyKey,number] = 0
+                            Curr["nextaction"+PlyKey,number] = Cur + 1.1
+                            soundStop( AmbId, 1 )
+                            
+                        }
+                    }
+                }
+            }
+
+            TimeInit = abs( clamp( Me:vel():length(), 0, Max ) - Max )
+            Time = clamp( TimeInit, 100, Max ) 
+            
+            if ( Time ) {
+                timer( "soundthink!" + Me:id(), Time )
+            }
+        }
+    }
+    if ( CustTimer:find("holodelete") ) {
+        local Needle = CustTimer:find( "!" )
+        local Me = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Me ) {
+            holoDelete( holoIndex( Me ) )
+        }
+    }
+}
