@@ -1,0 +1,643 @@
+@name e2 that applies torque to aim at stuff V6
+@inputs [ Parent ]:entity [ Delete ]:number [ Filter Extras ]:array
+@outputs [ Fire MaxRange ]:number [ Heading ]:vector [ Target ]:entity [ Blacklist Targets ]:array
+@persist [ Target E2 ]:entity [ MaxRange MinRange TargPlayers IgnoreBuddies IgnoreFriends TargNpcs TargVehicles IgnoreEmpty TargAcfAmmo IgnoreOwner IgnoreOwnerStuff VisibleOnly IgnoreBuilders TargetFurthest SmartJump ]:number
+@persist [ TorqueMul InertiaMul ]:number [ SpeedClamp ]:vector
+@persist [ TargetLead DropEnabled ShotInterval AutoBlacklist DetectBadTarg PrIgnoreDepth BlacklistFriendlyNpcs BlacklistEnemyNpcs Sounds UseFiringSound UseLoopSound ]:number
+@persist [ FireSounds LoopFireSounds AcquiredSounds LostSounds TrackingSounds SearchingSounds ]:table
+@persist [ Expensive ParentWasValid ]:number [ Blacklist ]:array [ ShootThresh ]:vector2 [ Targets ]:array
+@trigger 
+@model models/dav0r/camera.mdl
+
+if ( duped() ) {
+    reset()
+}
+
+if ( first() ) {
+    
+    #server-specific proprietary function
+    #ifdef entity:playerIsInPvp()    
+    function number entity:playerIsInPvpFixed() {
+        local Out = 0
+        if ( !isDedicated() ) {
+            Out = 1
+            if ( This:inNoclip() ) {
+                Out = 0
+            }
+        }
+        else {
+            Out = 0
+            if ( This:playerIsInPvp() & ( !This:inNoclip() | This:inVehicle() ) ) {
+                Out = 1
+            }
+        }
+        return Out
+    }
+    #else
+    function number entity:playerIsInPvpFixed() {
+        return 1
+    }
+    #endif
+    #plays sounds from table
+    function oneTimeSoundPlay( Data:table, Id:string ) {
+        if ( Data:count() ) {
+            foreach ( I:number, CurrSound:table = Data ) {
+                local IdInternal = Id + I:toString()
+                local AdminAndAdminCore = 0
+                if ( owner():isAdmin() ) { #admincore and owner is admin, use superior playsound
+                    #ifdef entity:fastSound( string, number )
+                    E2:fastSound( CurrSound["snd",string], 100, CurrSound["pit",number] )
+                    AdminAndAdminCore = 1
+                    #endif
+                }
+                if ( !AdminAndAdminCore ) { #boring backup method
+                    E2:soundPlay( IdInternal, 0, CurrSound["snd",string] )
+                    soundPitch( IdInternal, CurrSound["pit",number] )
+                } 
+            }
+        }
+    }
+    
+    timer( "find", 2000 )
+    ##QUESTIONS?
+    #Parent input
+        #if Parent input is wired, e2 will delete itself when parent is removed/dies
+        #useful for ensuring e2 despawns when a turret or contraption is critically damaged
+        #e2 also welds itself to parent input when not firing, else the e2 would drift around and look stupid
+    
+    #Delete input?
+        #deletes the e2
+        
+    #Filter input?
+        #e2 will not target anything in the inputted Filter array
+        
+    #Extras input?
+        #e2 will add anything in the inputted Extras array to the find
+    
+    ##EZ CONFIG BELOW
+    
+    #simple config for finding stuff
+    #ranges
+    MinRange = 0 #minimum range to look for targets 
+    MaxRange = 4000 #max range to look for targets
+    
+    #what to target
+    TargPlayers    = 1 #target players?
+     IgnoreBuddy   = 1 #ignore players who are my prop protection buddies?
+     IgnoreFriends = 1 #ignore my steam friends?
+    TargNpcs       = 1 #target npcs?
+    TargVehicles   = 1 #target vehicles?
+    IgnoreEmpty    = 1 #ignore vehicles with no driver?
+    TargAcfAmmo    = 0 #target acf ammocrates?
+    
+    #owner stuff
+    IgnoreOwner      = 1 #ignore the owner of the e2?
+    IgnoreOwnerStuff = 0 #ignore the e2 owner's stuff?
+    
+    #misc
+    VisibleOnly    = 1 #ignore targets that the e2 cannot see
+    IgnoreBuilders = 1 #ignores builders on CFC sandbox
+    PrIgnoreDepth  = 100 #ignore targets that are > this far behind props
+    TargetFurthest = 0 #targets the furthest entity from the e2, instead of the nearest
+    SmartJump      = 1 #e2 will find a target and stick with it, then when targ dies, it will find the next nearest target
+    
+    
+    #config for e2 movement
+    SpeedClamp  = vec( 20 ) #default 20, this is the max internal speed. keep this value low if you're going for a mechanical appearance
+    TorqueMul   = 200 #default 200, increase this and the e2 will aim overall faster, unstable if increased too high
+    InertiaMul  = 1 #default 1, adjusts how much the e2's inertia matters to the calculations
+    
+    #config for aiming
+    TargetLead   = 0.05 #how much will the e2 take target's velocity into account? 0 means e2 doesnt care, 0.2 means extreme lead
+    DropEnabled  = 0 #enables offsets that can help to circumvent projectile drop
+    ShootThresh  = vec2( 4, 4 ) #elevation and bearing threshold for fire to activate
+    ShotInterval = 0 #min time between shots
+    
+    #systems that blacklist undesirable targets
+    AutoBlacklist         = 1 #enable/disable system
+    DetectBadTarg         = 1 #detect and blacklist targets that are bugged? eg npcs that are dead but still being detected
+    BlacklistFriendlyNpcs = 1 #blacklist npcs friendly to the owner?
+    BlacklistEnemyNpcs    = 0 #blacklist npcs that are enemies to the owner?
+    
+    #sounds lol
+    Sounds          = 1 #enables/disables target acquired, idle, and shoot/reload sounds.
+     UseLoopSound   = 1 #use looping fire sounds?
+    
+    #tables of sounds!
+    #leave the parent tables empty for no sounds
+    #add as many sounds as you like, just follow the format
+    FireSounds = table( #shooting sounds that play normally
+        table( "snd" = "weapons/shotgun/shotgun_dbl_fire.wav", "pit" = 70 ),
+        table( "snd" = "weapons/357/357_fire2.wav", "pit" = 70 ),
+        table( "snd" = "weapons/mortar/mortar_fire1.wav", "pit" = 35 )
+    )
+    LoopFireSounds = table( #sounds that play -when- using looping firing sounds
+        table( "snd" = "Airboat.FireGunLoop", "pit" = 100 )
+    )
+    ReloadSounds = table( 
+    )
+    
+    AcquiredSounds = table( #sound e2 plays when it locks onto something
+        table( "snd" = "NPC_dog.Talk_1", "pit" = 100 )
+    )
+    LostSounds = table( #sad sounds e2 plays when it loses it's target :(
+        table( "snd" = "NPC_dog.Talk_1", "pit" = 80 )
+    )
+    
+    TrackingSounds = table( #plays these every 2 seconds when tracking a target
+        table( "snd" = "npc/scanner/scanner_scan2.wav", "pit" = 100 )
+    )
+    SearchingSounds = table( #same but when e2 doesnt have a target
+        table( "snd" = "NPC_CombineCamera.Ping", "pit" = 90 )
+    )
+         
+    
+    ##EZ CONFIG ENDS, ONLY DELVE DEEPER IF YOU HAVE THE SKILZ
+    #you have the skilz if you know what % does ;)
+}
+
+if ( clk( "find" ) | clk( "find2" ) | first() ) {
+    
+    #saves the e2's pos so im not calling entity():pos() more than once
+    E2 = entity()
+    local E2Pos = E2:pos()
+    local E2Owner = owner()
+    local SortPos = vec()
+    local ConnEnts = E2:getConnectedEntities()
+    
+    ##below does all the finding stuff, for more info if you want to customize; https://github.com/wiremod/wire/wiki/e2-docs-find
+    
+    if ( Extras:count() ) { #adds Extras
+        findIncludeEntities( Extras )
+    }
+    
+    if ( TargPlayers ) { #finds players
+        findIncludeEntities( players() )
+    }
+    if ( TargNpcs ) { #finds hl2 and hl;source npcs
+        findIncludeClass( "npc" )
+        findIncludeClass( "monster" )
+    }
+    if ( TargVehicles ) { #finds vehicles
+        findIncludeClass( "prop_vehicle_" )
+    }
+    if ( TargAcfAmmo ) {
+        findIncludeClass( "acf_ammo" )
+    }
+    
+    #finds near the e2's pos, in a sphere of maxrange radius
+    findInSphere( E2Pos, MaxRange )
+    
+    if ( MinRange ) { #ignores stuff inside the min range
+        findClipFromSphere( E2Pos, MinRange )
+    }
+    if ( IgnoreOwner ) { #Ignores the owner
+        findClipFromEntity( E2Owner )
+    }
+    if ( IgnoreOwnerStuff ) { #ignores the owner's stuff
+        findClipFromPlayerProps( E2Owner )
+    }
+    if ( Filter:count() ) { #ignores everything in the Filter input
+        findClipFromEntities( Filter )
+    }
+    if ( AutoBlacklist ) { #ignores stuff in the blacklist
+        findClipFromEntities( Blacklist )
+    }
+    if ( SmartJump ) {
+        if ( E2["lasttargettime",number] + 10 < curtime() ) {
+            SortPos = E2["lasttargetpos",vector]
+        }
+    }
+    else {
+        SortPos = E2Pos
+    }
+    
+    findSortByDistance( SortPos )
+    
+    Targets = findToArray()
+    local TargReversed = array()
+    
+    #reverse Targets
+    if ( TargetFurthest ) {
+        local TargCount = Targets:count()
+        for ( I = 1, TargCount ) {
+            local I2 = abs( I - TargCount )
+            local CurrTarg = Targets[I,entity]
+            TargReversed[I2,entity] = CurrTarg
+        }
+        
+        Targets = TargReversed
+    }
+    
+    #loops through all potential target
+    Target = entity( 0 )
+    for ( I = 1, Targets:count() ) {
+        local CurrTarg = Targets[I, entity]
+        local CurrPos = CurrTarg:massCenter() 
+        local ValidTarg = 1
+        
+        #these checks are ordered from least to most laggy
+        
+        if ( CurrTarg:isPlayer() & !CurrTarg:isAlive() ) {
+            ValidTarg = 0
+        }
+        if ( !ValidTarg ) {
+            continue
+        }
+        
+        if ( IgnoreEmpty ) {
+            if ( CurrTarg:isVehicle() & !CurrTarg:driver() ) {
+                ValidTarg = 0
+            }
+        }
+        if ( IgnoreBuddies ) {
+            if ( CurrTarg:isPlayer() & E2Owner:trusts( CurrTarg ) ) {
+                ValidTarg = 0
+            }
+        }
+        if ( IgnoreFriends ) {
+            if ( CurrTarg:isPlayer() & E2Owner:isSteamFriend( CurrTarg ) ) {
+                ValidTarg = 0
+            }
+        }
+        if ( !ValidTarg ) { #break this up so we dont waste cpus on the big checks below
+            continue
+        }
+        
+        #ignores builders on CFC sandbox
+        if ( IgnoreBuilders ) {
+            local OwnerInPvp = CurrTarg:owner():playerIsInPvpFixed()
+            local TargIsInPvp = CurrTarg:playerIsInPvpFixed()
+            local InPvp = OwnerInPvp | TargIsInPvp
+            
+            ValidTarg = InPvp ? 1 : 0
+        }
+        if ( !ValidTarg ) {
+            continue
+        }
+        
+        #save a target if it's visible to the e2
+        if ( VisibleOnly ) {
+            rangerHitEntities(0)
+            local IsVisibleRanger = rangerOffset( CurrPos, E2Pos )
+            
+            ValidTarg = !IsVisibleRanger:hitWorld()
+        }
+        if ( !ValidTarg ) {
+            continue
+        }
+        
+        #ignores ents that are too deep behind props
+        if ( PrIgnoreDepth ) {
+            rangerFilter( ConnEnts )
+            local VisRanger = rangerOffset( E2Pos, CurrPos )
+            local Depth = VisRanger:pos():distance( CurrPos )
+            local TooDeep = Depth > PrIgnoreDepth
+            local IsTarg = VisRanger:entity() == CurrTarg
+            ValidTarg = !TooDeep | IsTarg ? ValidTarg : 0
+        }
+        if ( !ValidTarg ) {
+            continue
+        }
+        
+        if ( ValidTarg ) {
+            Target = CurrTarg
+            break
+        }
+    }
+    
+    #starts another find in 2 seconds
+    timer( "find", 2000 )
+    
+    ##primary finding stuff end
+    
+    
+    #secondary find stuff
+    if ( Target ) {
+        
+        #this is for stuff that will never change, eg classes, dead npcs.
+        if ( AutoBlacklist ) {
+            
+            #defining variables for later
+            local TargType    = Target:type():lower()
+            local TargPos     = Target:massCenter()
+            local TargInWorld = TargPos:isInWorld()
+            local TargIsAlive = Target:health() > 0.5 | Target:maxHealth() == 0
+            local DoBlacklist = 0
+            local DoBlackTemp = 0
+            
+            #blacklists targets that arent valid
+            if ( DetectBadTarg ) {
+                if ( TargType:find( "player" ) ) { #blacklists things with "player" in their name, eg prop_physics_multiplayer
+                    if ( !Target:isPlayer() ) {
+                        DoBlacklist = 1
+                    }
+                }
+                if ( TargType:find( "npc" ) ) { #ditto but for npc
+                    if ( !Target:isNPC() ) {
+                        DoBlacklist = 1
+                    }
+                    #finds bugged npcs
+                    if ( !TargInWorld | !TargIsAlive ) { 
+                        DoBlacklist = 1
+                    }
+                }
+                if ( TargType:find( "vehicle" ) ) { #ditto but for vehicle
+                    if ( !Target:isVehicle() ) {
+                        DoBlacklist = 1
+                    }
+                }
+                #ifdef entity:acfIsAmmo()
+                if ( TargType:find( "acf_ammo" ) ) { #detect bait ammocrates
+                    local IsLinked = Target:acfLinks() ? 1 : 0
+                    local AmmoLikelyMine = TargPos:distance( E2Pos ) < 600 ? 1 : 0 #this is shit lol
+                    if ( !IsLinked | AmmoLikelyMine ) {
+                        DoBlacklist = 1
+                    }
+                }
+                #endif
+            }
+            
+            #ignores npcs that aren't gonna attack the owner
+            if ( !Target:owner():isNPC() ) { #this is needed because headcrabs were techincally owned by their now deceased host zombies
+                if ( BlacklistFriendlyNpcs ) {
+                    
+                    local TargDispToOwner = Target:npcDisp( E2Owner )
+                    if ( TargDispToOwner == "like" | TargDispToOwner == "neutral" ) {
+                        DoBlacklist = 1
+                    }
+                }
+                #ignores npcs that attack the owner
+                if ( BlacklistEnemyNpcs ) {
+                    
+                    local TargDispToOwner = Target:npcDisp( E2Owner )
+                    
+                    if ( TargDispToOwner == "hate" ) {
+                        DoBlacklist = 1
+                    }
+                }
+            }
+            if ( DoBlacklist ) {
+                Blacklist:pushEntity( Target )
+                Target = noentity()
+                stoptimer( "find" )
+                timer( "find", 100 )
+            }
+        }
+    }
+    if ( Target ) {
+        #turns on the expensive calculations when a valid target is found
+        Expensive = 1
+    }
+    else { #turns them off :(
+        Expensive = 0
+        Fire = 0
+        E2["firesound",number] = 0
+    }
+}
+
+if ( changed( Expensive ) ) {
+    if ( Expensive ) {
+        timer( "expensive", 40 )
+        #ifdef weld(entity,entity)
+        entity():constraintBreak( "weld", Parent )
+        #endif
+    }
+    elseif ( !Expensive ) {
+        timer( "expensivedelaystop", 500 )
+        #ifdef weld(entity,entity)
+        if ( !first() ) {
+            enableConstraintUndo(0)
+            weld( entity(), Parent )
+        }
+        #endif
+    }
+}
+    
+
+
+#expensive calculations that happen dozens of times a second
+if ( clk("expensive") ) {    
+    
+    timer( "expensive", 40 )
+    local E2Pos = E2:pos()
+    local E2Ang = E2:angles()
+    local TargPos = Target:boxCenterW()
+    
+    local AimPos = TargPos
+    local DistToTarg = AimPos:distance( E2Pos )
+    local LeadOffset = vec()
+    local DropComp = vec()
+    
+    local IsAlive = Target:isNPC() | Target:isPlayer()
+    local ValidTarg = IsAlive ? ( Target:health() > 0 | Target:maxHealth() == 0 ) & Target:isValid() : Target:isValid()
+    
+    if ( TargetLead ) { 
+        local LeadVelTarg = Target
+        for ( I = 1, 10 ) { #sometimes our target will be parented to something that is parented
+            local TargParent = LeadVelTarg:parent() 
+            if ( TargParent ) {
+                LeadVelTarg = TargParent
+            }
+            else {
+                break
+            }
+        }
+        
+        local Vel = E2:vel() + LeadVelTarg:vel() #account the target's plus my vel, maybe bad?
+        LeadOffset = Vel * TargetLead * DistToTarg * 0.001
+    }
+     
+    #offsets where the e2 aims by how far the e2 is away from something, very crude
+    #will not aim as high if e2 is physically above target
+    if ( DropEnabled ) { 
+        local DropMul = ( TargPos:z() - E2Pos:z() ) / 0.2
+        DropComp = DropEnabled ? vec( 0, 0, TargPos:distance( E2Pos ) ) / DropMul : vec(0)
+    }
+    
+    #defining the heading from the e2 to the target's pos
+    local Heading = vec( heading( E2Pos, E2Ang, AimPos + TargetLead ) )
+    
+    #adding all of the modifiers up
+    local AimPosFinal = AimPos + LeadOffset + DropComp
+    
+    #getting direction to the target as a normalized vector
+    local DirToTargComp = AimPosFinal - E2Pos
+    local DirToTarg     = DirToTargComp:normalized()
+        
+    #quaternions ahead, edit at your own risk
+    local M = 50 * InertiaMul #this cancels out current angular velocity, changing will have weird results.
+    local CurrAngle   = quat( entity():angles() )
+    local TargetAngle = quat( DirToTarg:toAngle() )
+    local Q = TargetAngle / CurrAngle
+    local Torque = E2:toLocal( rotationVector(Q) + E2:pos() )
+    #quaternions end here
+    
+    local TorqueClamped = clamp( Torque, -SpeedClamp, SpeedClamp )
+    
+    local E2Inertia = E2:inertia() * InertiaMul
+    local TorqueComp  = TorqueClamped * TorqueMul - E2:angVelVector() * M
+    
+    #makes sure e2 never mistakenly aims at world origin
+    if ( TargPos != vec(0) ) {        
+        #applies the force
+        E2:applyTorque( TorqueComp * E2Inertia )
+        
+    }
+    #outputting Fire if the bearing and elevation are less than ShootThresh
+    local BeaEleCombined = vec2( Heading )
+    local FireAllow = inrange( BeaEleCombined, -ShootThresh, ShootThresh ) & ValidTarg
+    if ( ShotInterval ) {
+        local LastShot = E2["lastshot",number]
+        if ( curtime() > LastShot + ShotInterval ) {
+            E2["lastshot",number] = curtime()
+            Fire = FireAllow
+            
+            if ( E2["doreloadsound",number] ) {
+                E2["doreloadsound",number] = 0
+                E2["reloadsound",number] = 1
+            }
+            E2["doreloadsound",number] = FireAllow
+            
+        }
+        else {
+            Fire = 0
+            
+        }
+    }
+    else {
+        Fire = FireAllow
+        
+    }
+    
+    #firing sounds!
+    if ( UseFiringSound ) {
+        if ( UseLoopSound ) {
+            BadFireSound = E2["firesound",number] != E2["oldfiresound",number]
+            if ( changed( FireAllow ) | BadFireSound ) {
+                if ( FireAllow ) {
+                    E2["firesound",number] = 1
+                }
+                else {
+                    E2["firesound",number] = 0
+                }
+                E2["oldfiresound",number] = E2["firesound",number]
+            }
+        }
+        else {
+            if ( Fire ) {
+                E2["firesound",number] = 1
+            }
+        }
+    }
+    
+    #checks if target is now dead, if so, run the find early
+    if ( ValidTarg & Target["target1hp",number] < 4 ) {
+        E2["wastarget",number] = 1
+        if ( Target:health() <= 1 | !Target:isAlive() ) {
+            Target["target1hp",number] = Target["target1hp",number] + 1 #ensures e2 only does this once per target
+            timer( "find2", 10 )
+        }
+    }
+    elseif ( !ValidTarg & E2["wastarget",number] ) {
+        E2["wastarget",number] = 0
+        timer( "find2", 10 )
+    }   
+    else {
+        E2["lasttargetpos",vector] = Target:pos()
+        E2["lasttargettime",number] = curtime()
+    }
+}   
+
+
+#sound stuff 
+if ( Sounds ) {
+    if ( E2["reloadsound",number] ) {
+        oneTimeSoundPlay( ReloadSounds, "reloadsound" )
+        E2["reloadsound",number] = 0
+    }
+    
+    #we are just doing normal sounds
+    if ( !UseLoopSound ) {
+        if ( E2["firesound",number] ) {
+            E2["firesound",number] = 0
+            oneTimeSoundPlay( FireSounds, "notloopingfiresound" )
+        }
+    }
+    #looping sounds that dont overwhelm the soundPlay throttle
+    else {
+        if ( curtime() > E2["loopsoundnextthink",number] ) {
+            E2["loopsoundnextthink",number] = curtime() + 0.1
+            if ( changed( E2["firesound",number] ) ) {
+                if ( E2["firesound",number] ) { 
+                    #starting all the sounds
+                    foreach ( I:number, CurrSound:table = LoopFireSounds ) {
+                        local Id = "loopingfiresound" + I:toString()
+                        E2:soundPlay( Id, 0, CurrSound["snd",string] )
+                        soundPitch( Id, CurrSound["pit",number] )
+                    }
+                }
+                elseif ( !E2["firesound",number] ) {
+                    #stoppin' em
+                    foreach ( I:number, CurrSound:table = LoopFireSounds ) {
+                        local Id = "loopingfiresound" + I:toString()
+                        soundStop( Id )
+                    }
+                }
+            }
+        }
+    }
+    
+    if ( clk( "find" ) ) {
+        if ( changed( Target ) ) {
+            if ( Target ) {
+                oneTimeSoundPlay( AcquiredSounds, "targetacquired" )
+                "NPC_dog.Talk_1"
+            }
+            if ( !Target ) {
+                oneTimeSoundPlay( LostSounds, "targetlost" )
+                "NPC_dog.Talk_1" 80
+            }
+        }
+        else {
+            if ( Target ) {
+                oneTimeSoundPlay( TrackingSounds, "tracking" )
+                "npc/scanner/scanner_scan2.wav"
+            }
+        }
+        if ( !Target ) {
+            oneTimeSoundPlay( SearchingSounds, "searchsound" )
+            "NPC_CombineCamera.Ping"
+        }
+    }
+}
+
+if ( clk( "expensivedelaystop" ) ) {
+    if ( !Expensive ) {
+        stoptimer( "expensive" )
+    }
+}
+
+#saves if parent was true
+if ( Parent ) {
+    ParentWasValid = 1
+}
+
+#if Parent was ever true, and is now not true, remove the e2, or if Delete
+if ( ( ParentWasValid & !Parent ) | Delete ) {
+    selfDestruct()
+}
+
+#allows for entity specific timers
+local CustTimer = clkName()
+if ( CustTimer ) {
+    local Needle = CustTimer:find( "!" )
+    if ( CustTimer:find("unblacklist") ) {
+        local Find = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        
+        if ( Find ) {
+            print( "unblack " + Find:toString()  )
+            Blacklist:remove( Find:id() )
+        }
+    }
+}
