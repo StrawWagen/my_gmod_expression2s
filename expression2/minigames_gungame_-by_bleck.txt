@@ -1,0 +1,918 @@
+@name minigames gungame -by bleck
+@outputs [ PlayersIn Players Levels ]:array [ Modes Stats WeaponFailures ]:table 
+@persist [ PlyLvl PrevWeapons Modes Stats Ratios ]:table [ Players PlayersIn OldPlayers FoundPlayers ModeKeys Levels ]:array [Prop1, Prop2]:entity [ Title ]:string 
+@persist [ SavedProp1Pos SavedProp2Pos DefMsgColor ]:vector [ LJ Restarting ModeINC Overtime RestartTime GlobalMsg ]:number
+@persist [ GoodSound NeutSound BadSound ]:string E2StartTime
+@model models/props_lab/monitor01a.mdl
+
+#by bleck
+
+if ( duped() ) {
+    reset()
+}
+
+
+#replace id with modern ! -done
+#add custtimer to give player weapon -done
+#add ensure clip full custtimer -impossible
+
+#include "lib/unbreakable"
+
+if ( first() ) {
+    
+    
+    E2StartTime = curtime()
+    
+    GoodSound   = "buttons/button17.wav"
+    NeutSound   = "buttons/lightswitch2.wav"
+    BadSound    = "buttons/button10.wav"
+    DefMsgColor = vec(255)
+    RestartTime = 1 #def 0.5
+    
+    function array gunGameTunedIn() {
+        local Out = array()
+        if ( GlobalMsg ) {
+            Out = players()
+            
+        }
+        else {
+            if ( Restarting ) {  
+                Out = OldPlayers:clone()
+                Out:pushEntity( owner() )
+                
+            }
+            else {                
+                Out = Players:clone()
+                Out:pushEntity( owner() )
+                
+            }
+        }
+        return Out
+        
+        
+    }
+    
+    function array:arrSetHealth( Health:number ) {
+        for ( I = 1, This:count() ) {
+            This[I,entity]:plySetHealth( Health )
+        }
+    }
+    
+    function overtimeStart() {
+        timer( "overtime", 5 * 60000 )
+        Overtime = 0
+    }
+    
+    function overtimeStop() {
+        stoptimer( "overtime" )
+    }
+    
+    function vector entity:plyTeamColor() {
+        return teamColor( This:team() )
+    }
+    
+    function table table:tableReturnMin() {
+        local ThisKeys     = This:keys()
+        
+        local MinVal = 10000
+        local KeyOut = "ERROR"
+        
+        for ( I = 1, ThisKeys:count() ) {
+            local CurrKey    = ThisKeys[I,string]
+            local CurrNumber = This[CurrKey,number]
+            
+            if ( CurrNumber < MinVal ) {
+                MinVal = CurrNumber
+                KeyOut = CurrKey
+            }
+        }
+        
+        Return = table(
+            "key" = KeyOut,
+            "min" = MinVal
+        )
+        
+        return Return
+    }
+    
+    function table table:tableReturnMax() {
+        local ThisKeys     = This:keys()
+        
+        local MaxVal = -10000
+        local KeyOut = "ERROR"
+        
+        for ( I = 1, ThisKeys:count() ) {
+            local CurrKey    = ThisKeys[I,string]
+            local CurrNumber = This[CurrKey,number]
+            
+            if ( CurrNumber > MaxVal ) {
+                MaxVal = CurrNumber
+                KeyOut = CurrKey
+            }
+        }
+        
+        Return = table(
+            "key" = KeyOut,
+            "max" = MaxVal
+        )
+        
+        return Return
+    }
+        
+    
+    function statsIncrease( Attacker:entity, Victim:entity ) {
+        local AttackerCurrGun = Levels[PlyLvl[Attacker:steamID(), number], string]
+        local VictimCurrGun   = Levels[PlyLvl[  Victim:steamID(), number], string]
+        
+        local AttackerStats = Stats[AttackerCurrGun,number]
+        local VictimStats   = Stats[  VictimCurrGun,number]
+        
+        if ( AttackerCurrGun == VictimCurrGun ) {
+            Stats[AttackerCurrGun,number] = AttackerStats 
+            Stats[  VictimCurrGun,number] = VictimStats
+        }
+        
+        else {
+            Stats[AttackerCurrGun,number] = AttackerStats + 1
+            Stats[  VictimCurrGun,number] = VictimStats   + -1
+        }
+    }
+    
+    function statsPrintWorstBest() {
+        
+        local Min = Stats:tableReturnMin()
+        local Max = Stats:tableReturnMax()
+        
+        print( Min["key",string] + " " + Min["min",number] )
+        print( Max["key",string] + " " + Max["max",number] )
+    }
+            
+        
+    
+    function string ggGiveWeap( This:entity ) {
+        if ( !This:vehicle() ) {
+            local Level = PlyLvl[This:steamID(), number]
+            local Weap = Levels[Level, string]
+            
+            This["gungamenewweap",string] = Weap
+            timer( "gungamenewweap!" + This:id(), 30 )
+            
+            if ( Weap ) {
+                return Weap
+            }
+            else {
+                return ""
+            }
+        }
+        else {
+            return ""
+        }
+    }
+    
+    function mixMode() {
+        
+        Select = ModeKeys[ModeINC, string]
+        Levels = Modes[Select, array]
+        
+        gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title, DefMsgColor, "Mode set to "+ Select ) )
+        
+        if ( ModeINC + 1 > ModeKeys:count() ) {
+            ModeINC = 1
+        }
+        else {
+            ModeINC++
+        }
+    }
+    
+    function number keyFromVal( A:array, Ent:entity ) {
+        for( I=1, A:count() ) {
+            if ( A[I, entity] == Ent ) {
+                return I
+            }
+        }
+        return 0
+    }
+    
+    # fake restart loading so that there's breaks between the rounds
+    function ggRestart( RestartTimeIn:number ) {
+        local RestartTime2 = RestartTimeIn #in minutes
+        
+        timer( "restart", RestartTime2 * 60000 )
+        timer( "restarthalf", ( RestartTime2 * 60000 ) * 0.5 )
+        timer( "restartnearly", ( RestartTime2 * 60000 ) * 0.90 )
+        Restarting = 1
+        overtimeStop()
+        
+        gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title + "Starting next round..." ) )
+    }
+    
+    #onX stuff
+    
+    function entity:onEnter() {
+        if ( !This:plyHasGod() ) {
+            
+            Players:pushEntity( This )
+            This["transitioning",number] = 0
+            
+            local Weapons = This:getWeapons()
+            local Weaps = array()
+            for( I=1, Weapons:count() ) {
+                Weaps:pushString( Weapons[I, entity]:type() )
+            }
+            if ( !PlyLvl[This:steamID(), number] ) {
+                PlyLvl[This:steamID(), number] = 1
+            }
+            PrevWeapons[This:steamID(), array] = Weaps
+            ggGiveWeap( This )
+        }
+    }
+    
+    function entity:onLeave() {
+        
+        Players:removeEntity( Players:indexOf( This ) )
+        This["transitioning",number] = 0
+        
+        local Weaps = PrevWeapons[This:steamID(), array]
+        
+        if ( This:isAlive() ) {
+            This:stripWeapons()
+            for( I=1, Weaps:count() ) {
+                This:plyGive( Weaps[I, string] )
+            }
+            if ( This:isAlive() ) {
+                This:plySelectWeapon( "weapon_physgun" )	
+            }
+        }
+    }
+    
+    function array:onEnterArr() {
+        local Joiners = This
+        local JoinersOptimise = 0
+        
+        for( I=1, Joiners:count() ) {
+            local Curr = Joiners[I, entity]
+            if ( Curr["transitioning",number] != E2StartTime ) {
+                Curr["transitioning",number] = E2StartTime
+                timer( "onenter!" + Curr:id(), JoinersOptimise * 75 )
+                JoinersOptimise++
+            }
+        }
+    }
+    
+    function array:onLeaveArr() {
+        
+        local Leavers = This
+        
+        local LeaversOptimise = 0
+        for( I=1, Leavers:count() ) {
+            local Curr = Leavers[I, entity]
+            if ( Curr["transitioning",number] != E2StartTime ) {
+                Curr["transitioning",number] = E2StartTime
+                timer( "onleave!" + Curr:id(), LeaversOptimise * 75 )
+                LeaversOptimise++
+            }
+        }
+    }
+    
+    function entity:onSuicide() {
+        local N = PlyLvl[This:steamID(), number]
+        PlyLvl[This:steamID(), number] = clamp( N-1, 1, Levels:count() )
+        PlyColor = This:plyTeamColor()
+        This:fastSound( BadSound, 100 )
+        Players:sendMessageColor( array( DefMsgColor, Title, PlyColor, This:name(), DefMsgColor, " lost a level by suiciding!" ) )
+    }
+    
+    function entity:onWin() {
+        OldPlayers = Players:clone()
+        Restarting = 1
+        E = effect()
+        E:setScale( 10 )
+        E:setMagnitude( 10 )
+        E:setRadius( 12 )
+        E:setOrigin( This:shootPos() )
+        E:play( "Sparks" )
+        This:fastSound( "garrysmod/save_load4.wav", 130, 100 )
+        
+        PlyColor = teamColor( This:team() )
+        gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title, DefMsgColor, "!! ", PlyColor, This:name(), DefMsgColor, " has won the round !!" ) )
+        
+        Players:arrSetHealth( 100 )        
+        statsPrintWorstBest()
+        ggRestart( RestartTime )
+        NotifyPlayers = Players:clone()
+        Players:onLeaveArr()
+    }
+    
+    function entity:onKill() {
+        local N = PlyLvl[This:steamID(), number]
+        PlyLvl[This:steamID(), number] = N + 1
+        
+        Weap = ggGiveWeap( This )
+        
+        LvlCount = Levels:count()
+        CurrLvl = PlyLvl[This:steamID(), number]
+        
+        if ( inrange( CurrLvl, 1, LvlCount ) ) {
+            PlyColor = This:plyTeamColor()
+            if ( inrange( CurrLvl, 1, LvlCount + -1 ) ) {
+                This:fastSound( NeutSound, 100 )
+                Players:sendMessageColor( array( DefMsgColor, Title, PlyColor, This:name(), DefMsgColor, " got the weapon " + Weap + "!" ) )
+            }
+            elseif ( inrange( CurrLvl, 1, LvlCount ) ) {
+                This:fastSound( GoodSound, 100 )
+                Players:sendMessageColor( array( DefMsgColor, Title, PlyColor, This:name(), vec( 255, 0, 0 ), " got the final weapon, " + Weap + "!" ) )
+            }
+        }
+        if ( CurrLvl > Levels:count() ) {
+            This:onWin()
+        }
+    }
+    
+    #other stuff
+    
+    function entity:degradeCheck() {
+        local N = PlyLvl[This:steamID(), number]
+        
+        if ( N == Levels:count() ) {
+            This:fastSound( NeutSound, 100 )
+            PlyLvl[This:steamID(), number] = N - 1
+            PlyColor = This:plyTeamColor()
+            Players:sendMessageColor( array( DefMsgColor, Title, PlyColor, This:name(), DefMsgColor, " lost a level at the last weapon!" ) )
+        }
+    }
+    
+    function array:enterControl( A:array ) {
+        local Joiners = This:difference( A )
+        local Leavers = A:difference( This )
+        Joiners:onEnterArr()
+        Leavers:onLeaveArr()
+    }
+    
+    function array:customSetMaxHealth( TargHP, Array:array ) {
+        for ( I = 1, This:count() ) {
+            Current = This[I,entity]
+            if ( Current:health() > TargHP ) {
+                Current:plySetHealth( TargHP )
+                Current:sendMessageColor( Array ) 
+            }
+            if ( Current:armor() > 0 ) {
+                Current:plySetArmor(0)
+            }
+        }
+    }
+    
+    function array:ggVerifyWeapons() {
+        
+        for ( I = 1, This:count() ) {
+            local GGVerifyCurrent = This[I,entity]
+            if ( GGVerifyCurrent:isAlive() ) {
+                if (
+                    GGVerifyCurrent:weapon():type() == Levels[PlyLvl[GGVerifyCurrent:steamID(), number], string]
+                    |
+                    GGVerifyCurrent:weapon():type() == "none"
+                ) {}
+                else {
+                    ggGiveWeap( GGVerifyCurrent )
+                }
+            }
+        }
+    }  
+    
+    function array:ggVerifyAmmo() {
+        
+        for ( I = 1, This:count() ) {
+            local CurrPly = This[I,entity]
+            
+            local PrimaryAmmoType = CurrPly:weapon():primaryAmmoType()
+            local SecondaAmmoType = CurrPly:weapon():secondaryAmmoType()
+            
+            PrimaryTarg = 100
+            
+            if ( CurrPly:ammoCount( PrimaryAmmoType ) < PrimaryTarg ) {
+                CurrPly:plyGiveAmmo( PrimaryAmmoType, PrimaryTarg * 1.2 )
+            }
+            if ( CurrPly:ammoCount( SecondaAmmoType ) < PrimaryTarg ) {
+                CurrPly:plyGiveAmmo( SecondaAmmoType, PrimaryTarg * 1.2 )
+            }
+        }
+    }        
+    
+    runOnTick( 1 )
+    runOnDeath( 1 )
+    
+    propSpawnUndo(0)
+    
+    local BounderPos = entity():pos() + vec(0,0,25)
+    
+    Prop1 = propSpawn( "models/hunter/blocks/cube025x025x025.mdl", BounderPos, 1 )
+    Prop2 = propSpawn( "models/hunter/blocks/cube025x025x025.mdl", BounderPos, 1 )
+    noCollideAll( Prop1, 1 )
+    noCollideAll( Prop2, 1 )
+    
+    entity():setMass( 50000 )
+    Prop1:setMass( 50000 )
+    Prop2:setMass( 50000 )
+    
+    entity():makeUnbreakable()
+    Prop1:makeUnbreakable()
+    Prop2:makeUnbreakable()
+    
+    Restarting = 0
+    
+    Title = "[GunGame] "
+    
+    GlobalMsg = 0
+    
+    local Misc = 1
+    local M9K = 1
+    local CW = 1
+    local TFA = 1
+    local ALL = 1
+    
+    ##Misc
+    if ( Misc ) {
+        Modes["Melee", array] = array( 
+            "m9k_harpoon", #good harpoon
+            "cw_extrema_ratio_official", #good knife
+            "m9k_damascus", #shitty sword
+            "weapon_fists", #fists
+            "cfc_super_slappers",
+            "m9k_knife" #shitty knife
+            
+        )    
+        Modes["American Police Officer", array] = array(
+            "m9k_nerve_gas",
+            "ins2_atow_rpg7",
+            "m9k_m16a4_acog",
+            "m9k_mossberg590",
+            "m9k_deagle",
+            "tfa_l4d2mw_riotshield",
+            "tfa_l4d2mw_baton"
+        )
+        Modes["Half Life 2", array] = array( 
+            "weapon_rpg", #triumphant final weapon
+            "weapon_smg1", #medium smg
+            "weapon_crossbow", #strong crossbow
+            "weapon_shotgun", #strong shotgun
+            "weapon_357", #strong pistol
+            "weapon_pistol", #weak pistol
+            "weapon_stunstick", #lol
+            "weapon_crowbar", #weak melee
+            "weapon_slam" #weak memey weapon
+        )
+        Modes["Specialties", array] = array( 
+            "ins2_atow_rpg7", #cw rpg
+            "m9k_ares_shrike", #good lmg
+            "m9k_1897winchester", #good shotgun
+            "m9k_spas12", #good shotgun
+            "m9k_usas", #strong auto shotgun
+            "m9k_minigun", #minigun
+            "m9k_jackhammer", #decent shotgun
+            "m9k_m1918bar", #shit lmg
+            "m9k_striker12", #shit auto shotgun
+            "cw_g4p_g2contender",
+            "m9k_m98b", # 1 hit kill sniper
+            "cw_m79", #cw gl
+            "m9k_proxy_mine" #proxy mine
+        )
+        Modes["Bar Brawl", array] = array( 
+            "m9k_glock", 
+            "cw_extrema_ratio_official", 
+            "weapon_crowbar", 
+            "tfa_l4d2mw_bat",
+            "weapon_fists",
+            "cfc_slappers"
+        )
+        Modes["Half Life Source", array] = array(
+            "weapon_rpg_hl1", #laser rpg
+            "weapon_mp5_hl1", #consistient dmg dealer
+            "weapon_crossbow_hl1", #slow firerate but strong
+            "weapon_hornetgun", #spammy but easy kill
+            "weapon_gauss", #strong but precice
+            "weapon_shotgun_hl1", #reliable shotgunq 
+            "weapon_crowbar_hl1", #final melee
+            "weapon_snark" #spammy but easy kill
+        )
+        Modes["Action Movie", array] = array(
+            "m9k_milkormgl", #grenade launcher
+            "m9k_m4a1", #decent ar
+            "m9k_ak47", #decent ar
+            "m9k_m60", #decent mg
+            "m9k_mossberg590", #decent shotgun
+            "m9k_mp5", #bad smg
+            "m9k_minigun", #strong mg
+            "m9k_barret_m82", #decent sniper
+            "cw_extrema_ratio_official" #strong knife
+        )
+    }
+    
+    if ( ALL ) {
+        Modes["Assorted Shotguns", array] = array(
+            "m9k_1897winchester", #good m9k shotty
+            "tfa_ins2_m500", #only tfa shotty
+            "cw_xm1014_official", #good CW shotgun
+            "cw_saiga12k_official", #cw autoshotty
+            "m9k_mossberg590", #decent m9k
+            "cw_shorty", #two shot shitgun
+            "cw_g4p_g2contender",
+            "m9k_ithacam37" #the funny
+        )
+        Modes["Revolvers", array] = array(
+            "weapon_357", #best revolver ?
+            "m9k_ragingbull", #strong revolver
+            "m9k_remington1858", #generic
+            "m9k_model3russian", #funny looking gun
+            "m9k_model627", #generic aswell
+            "cw_ragingbull", #cw raging bull, strongest but weak
+            "cw_mr96", #midrange revolver
+            "cw_g4p_mp412_rex", #worst one
+            "m9k_model500", #90 dmg slow fire
+            "weapon_357_hl1" #hl1 revolver lol
+        )
+        Modes["MPS", array] = array(
+            "weapon_smg1", #strongest mp?
+            "m9k_ump45", #same as mp40
+            "m9k_mp7", #same as mp40 too
+            "m9k_mp5sd", #faster firerate but same dps
+            "m9k_mp9", #same as mp5sd
+            "m9k_mp40", #strongest mp?
+            "weapon_mp5_hl1", #hl1 one lol
+            "cw_tr09_mp9", #good dps cw mp
+            "cw_ump45", #worse dps cw mp
+            "cw_mp5", #even worse dps 
+            "cw_mp7_official", #even worse dps
+            "cw_mp9_official" #even worse dps
+        )
+        Modes["Glocks", array] = array(
+            "m9k_glock", #fullauto glock
+            "cw_g18", #fullatuo glock
+            "cw_g4p_glock17", #restricted glock ( shit )
+            "weapon_glock_hl1" #shit glock
+        )
+        Modes["AKS", array] = array(
+            "weapon_ak47", #good ak
+            "m9k_ak47", #good ak
+            "m9k_ak74", #good ak
+            "cw_ak74"#, #okay ak, also hard to use
+            #"tfa_ins2_abakan" #okay ak, lots of spread
+        )
+        Modes["Small Guns", array] = array(
+            "m9k_tec9",
+            "cw_boberg", #small
+            "cw_fiveseven", #smallishish
+            "cw_g4p_fiveseven", #fiveseven again lol
+            "cw_m1911", #smallish
+            "cw_g4p_usp40", #smaller
+            "cw_makarov" #smallest
+        )
+        if ( M9K ) {
+            Modes["Unwinnable", array] = array(
+                "weapon_smg1", #evil
+                "m9k_fists" #even more evil
+            )
+        }
+    }
+    
+    
+    ##M9K
+    if ( M9K ) {
+        Modes["M9K Variety Mix", array] = array( 
+            "m9k_m249lmg", #medium lmg
+            "m9k_ak47", #medium assault rifle
+            "m9k_m1918bar", #weak lmg
+            "m9k_bizonp19", #weak smg
+            "m9k_minigun", #minigun
+            "m9k_1887winchester", #strong shotgun
+            "m9k_mossberg590", #strong shotgun            
+            "m9k_fal", #strong semi auto assault rifle
+            "m9k_deagle", #strong pistol
+            "m9k_m98b", #slow sniper
+            "cw_extrema_ratio_official" #knife
+        )
+        Modes["M9K Wild West", array] = array( 
+            "m9k_1887winchester", #strong shotgun
+            "m9k_browningauto5", #strong shotgun
+            "m9k_svt40", #semi auto sniper
+            "m9k_m29satan", #strong pistol
+            "m9k_remington1858", #strong pistol
+            "m9k_model627", #weak ish pistol
+            "m9k_model500", #strong slow firing pistol
+            "m9k_winchester73", #semi auto rifle
+            "m9k_model3russian", #shit pistol
+            "m9k_damascus" #memey melee
+        )
+        Modes["M9K Snipers", array] = array( 
+            "m9k_sl8", #automatic sniper
+            "m9k_barret_m82", #1 hit kill anti infantry
+            "m9k_psg1", #generic sniper
+            "m9k_dragunov", #silenced sniper
+            "m9k_intervention", #360 noscope
+            "m9k_m98b", #1 hit kill anti material rifle
+            "m9k_m24", #pump sniper
+            "m9k_contender" #memey small gun
+        )
+        Modes["M9K Assault Rifles", array] = array(
+            "m9k_m416", #strong ar
+            "m9k_m4a1", #decent ar
+            "m9k_ak47", #strong ar
+            "m9k_amd65", #generic but fast firing ar
+            "m9k_l85", #stronger scoped rifle
+            "m9k_f2000", #cool looking but weaker gun
+            "m9k_auga3", #scoped rifle 
+            "m9k_val", #cool ar, decent accuracy and damage
+            "m9k_ak74", #generic low accuracy ar
+            "m9k_m16a4_acog", #decent semi auto ar
+            "m9k_m14sp", #semi auto rifle
+            "m9k_winchester73" #slow firing final ar
+        )
+        Modes["M9K Shotguns", array] = array(
+            "m9k_striker12", #autoshotgun w/ biggest clip
+            "m9k_usas", #autoshotgun
+            "m9k_1897winchester", #strong shotty
+            "m9k_spas12", #shotgun with big clip
+            "m9k_1887winchester", #strong ish shotty
+            "m9k_dbarrel", #dbarrel with slow reloads
+            "m9k_remington870", #weak ish shotgun
+            "m9k_m3", #weak ish shotgun
+            "m9k_jackhammer", #autoshotgun
+            "m9k_browningauto5", #bad shotgun
+            "m9k_ithacam37" #the funny
+        )
+    }
+    
+    
+    ##CW
+    if ( CW ) { 
+        Modes["CW Variety Mix", array] = array(
+            #"cw_tr09_aresshrike", #insane MG
+            "cw_m249_official", #strong MG
+            "cw_ak74", #decent ar
+            "cw_g36c", #decent smg
+            "cw_mac11", #spam smg
+            "cw_m3super90", #strong shotgun
+            "cw_famasg2_official", #strong ar
+            "cw_shorty", #weaker feeling shotgun
+            "cw_ragingbull", #strong revolver
+            "cw_deagle", #punchy pistol
+            "cw_makarov", #shit pistol
+            "cw_l115", #strong sniper
+            "cw_extrema_ratio_official"
+        )
+    }
+    #TFA
+    if ( TFA ) { 
+        Modes["TFA Melee", array] = array(
+            "tfa_l4d2mw_katana",
+            "tfa_l4d2mw_golfclub",
+            "tfa_l4d2mw_metalbat",
+            "tfa_l4d2mw_machete",
+            "tfa_l4d2mw_baton",
+            "tfa_l4d2mw_bat",
+            "tfa_l4d2mw_shovel",
+            "tfa_l4d2mw_sledgehammer",
+            "tfa_l4d2mw_pitchfork",
+            "tfa_l4d2mw_crowbar",
+            "tfa_l4d2mw_etool",
+            "tfa_l4d2mw_riotshield",
+            "tfa_l4d2mw_knife"
+            
+        )
+    }
+    
+    gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title +"Game created." ) )
+    
+    ModeKeys = Modes:keys():shuffled()
+    
+    ModeINC = ModeKeys:indexOf( "American Police Officer" )
+    
+    mixMode()
+    
+    overtimeStart()
+    
+    holoCreate( 1 )
+        holoModel( 1, "models/hunter/blocks/cube4x4x4.mdl" )
+        holoMaterial( 1, "sprops/sprops_grid_12x12" )
+        holoColor( 1, vec4( 255, 0, 0, 100 ) )
+        holoDisableShading( 1, 1 )
+}
+
+if ( clk( "expensive1" ) ) {
+    if ( !Prop1:isValid() ) {
+        holoCreate(100, SavedProp1Pos, vec(1,1,1), ang(0,0,0), vec4(255,255,255,0))
+        Prop1 = holoEntity(100)
+    }
+    else {
+        SavedProp1Pos = Prop1:pos()
+    }
+    if ( !Prop2:isValid() ) {
+        holoCreate(101, SavedProp2Pos, vec(1,1,1), ang(0,0,0), vec4(255,255,255,0))
+        Prop2 = holoEntity(101)
+    }
+    else {
+        SavedProp2Pos = Prop2:pos()
+    }
+}
+
+
+if ( !Restarting & Prop1:isValid() & Prop2:isValid() ) { # are all the parts we need valid?
+    
+    timer( "expensive1", 300 ) #puts expensive stuff off of runontick
+    
+    if ( clk( "expensive1" ) ) {
+        
+        local Pos1 = Prop1:pos() + vec( 0,0,-50 )
+        local Pos2 = Prop2:pos() + vec( 0,0,-50 )
+        
+        local ArrPrev = PlayersIn:clone() #saves the old players
+        findByClass( "player" ) #makes sure the find doesnt bloat too much
+        findClipToClass( "player" ) #no prop physics multiplayer
+        findClipToBox( Pos1, Pos2 ) #in the box
+        findClipFromEntities( getDead() ) #if you dead, you out of the game
+        findClipFromEntities( getBuilders() )
+        local FoundPlayers = findToArray() 
+        PlayersIn = FoundPlayers #saves find
+        
+        PlayersIn:enterControl( ArrPrev ) #enters/exits players
+        holoPos( 1, ( Pos1 + Pos2 )/2 ) #red box stuff
+        holoScaleUnits( 1, positive( Pos1 - Pos2 ) )
+        
+        Pvpers = isDedicated() ? Players:difference( getBuilders() ) : Players #gets pvpers as an array
+        Pvpers:ggVerifyWeapons() #verifies weapons/ammo
+        Pvpers:ggVerifyAmmo()
+        
+        if ( Overtime ) {
+            if ( Players:count() > 0 ) {
+                Pvpers:customSetMaxHealth( 25, array( DefMsgColor, Title, vec( 255, 0, 0 ), " Overtime!, max health is set lower." ) )
+            }
+            else {
+                ggRestart(0.1)
+            }
+        }       
+    }
+    
+    if ( clk( "overtime" ) ) {
+        if ( Players:count() > 0 ) {
+            Overtime = 1
+        }
+        else {
+            ggRestart(0.1)
+        }
+    }
+      
+    if ( deathClk() ) {
+        local Attacker = lastDeathAttacker()
+        local Victim = lastDeath()
+        
+        local AttackerPlaying = keyFromVal( Players, Attacker )
+        local VictimPlaying = keyFromVal( Players, Victim )
+        
+        BothPlayers = Attacker:isPlayer() & Victim:isPlayer() ? 1 : 0
+        
+        if ( AttackerPlaying & VictimPlaying ) {
+            if ( #ifdef Attacker:playerIsInPvp() 
+                Attacker:playerIsInPvp() 
+                #else
+                !Attacker:inGodMode()  
+            ) {
+                if ( Attacker != Victim ) {
+                    if ( Attacker:weapon():type() == Levels[PlyLvl[Attacker:steamID(), number], string] ) {
+                        
+                        statsIncrease( Attacker, Victim )
+                        
+                        Attacker:onKill()
+                        Victim:degradeCheck()
+                        Victim:onLeave()
+                        
+                        PrevWeapons[Victim:steamID(), array] = array()
+                        
+                    }
+                    else {
+                        Attacker:plyStripWeapons()
+                        ggGiveWeap( Attacker )
+                        PlyColor = Attacker:plyTeamColor()
+                        Attacker:sendMessageColor( DefMsgColor, Title, PlyColor, Attacker:name(), DefMsgColor, ", please don't use that weapon like that." )
+                        
+                        print( Attacker:name() + " bad weapon " + Levels[PlyLvl[Attacker:steamID(), number], string] )
+                    }
+                }
+                else {
+                    Attacker:onSuicide()
+                    Attacker:onLeave()
+                }
+            }
+            
+        }
+        elseif ( !AttackerPlaying & VictimPlaying & BothPlayers & Attacker:isAlive() ) {
+            PlyColor = Attacker:plyTeamColor()
+            Attacker:sendMessageColor( array( DefMsgColor, Title, PlyColor, Attacker:name(), vec(255,50,50), ", do not interfere with the minigame!" ) )
+            if ( Attacker:weapon():isValid() ) {
+                Attacker:plyDropWeapon( Attacker:weapon() )
+            }
+            Attacker:plyGive( "none" )
+            Attacker:selectWeapon( "none" )
+            
+            concmd( "ulx slap $" + Attacker:steamID() + " 75" )
+            concmd( "ulx curse $" + Attacker:steamID() )
+            
+            print( Attacker:name() + " interfered" )
+        }   
+        elseif ( AttackerPlaying & !VictimPlaying ) {
+            PlyColor = Attacker:plyTeamColor()
+            Attacker:sendMessageColor( array( DefMsgColor, Title, PlyColor, Attacker:name(), vec(255,50,50), ", they aren't playing the minigame!" ) )
+            Attacker:plyGive( "none" )
+            Attacker:selectWeapon( "none" )
+        }   
+    }
+}
+
+if ( clk( "restart" ) ) {
+    Restarting = 0
+    PlyLvl = table()
+    PlayersIn = array()
+    WeaponFailures = table()
+    
+    FoundPlayers:arrSetHealth(100)
+    FoundPlayers:onEnterArr()
+    
+    overtimeStart()
+    Stats = table()
+    
+    mixMode()
+}
+
+
+#cosmetic/out of place stuff
+
+if ( clk( "restarthalf" ) ) {
+    gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title + "Restart 50% complete." ) )
+}
+if ( clk( "restartnearly" ) ) {
+    gunGameTunedIn():sendMessageColor( array( DefMsgColor, Title + "Restart 90% complete." ) )
+}
+
+local MaxFails = 15
+
+local CustTimer = clkName()
+if ( CustTimer != "" ) {
+    if ( CustTimer:find("onenter") ) {
+        local Needle = CustTimer:find( "!" )
+        local This = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        if ( This ) {
+            This:onEnter()
+        }
+    }
+    if ( CustTimer:find("onleave") ) {
+        local Needle = CustTimer:find( "!" )
+        local This = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        if ( This ) {
+            This:onLeave()
+        }
+    }
+    if ( CustTimer:find("gungamenewweap") ) {
+        local Needle = CustTimer:find( "!" )
+        local This = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        if ( This ) {
+            local Weap = This["gungamenewweap",string]
+            if ( Weap != "" ) {                    
+                This:plyStripWeapons()
+                
+                This:plyGive( Weap )
+                This:plyGive( "none" )
+                
+                This:selectWeapon( Weap )	
+                
+                This["gungamevalidweap",string] = Weap
+                timer( "gungamecheckvalid!" + This:id(), 200 )
+                
+            }
+        }
+    }
+    if ( CustTimer:find("gungamecheckvalid") ) {
+        local Needle = CustTimer:find( "!" )
+        #get player
+        local This = entity( CustTimer:sub( Needle + 1 ):toNumber() )
+        #in pvp
+        if ( This & This:playerIsInPvp() & !This:vehicle() ) {
+            local Weap = This["gungamevalidweap",string]
+            local WeapsLevel = Levels:indexOf( Weap )
+            local HasWeapon = This:weapon( Weap )
+            #playing, doesn't have the weapon equipped, weapon is still in the gungame
+            if ( Players:indexOf( This ) & !HasWeapon & WeapsLevel ) {
+                #if tried too many times, bail on the weapon!
+                WeaponFailures[Weap,number] = WeaponFailures[Weap,number] + 1
+                if ( WeaponFailures[ Weap,number ] > MaxFails ) {
+                    print( Weap + " Failed " + toString( MaxFails ) + " Times, Removing... " )
+                    Levels:remove( WeapsLevel )
+                    
+                    
+                }
+                #try again
+                ggGiveWeap( This )
+
+            }
+        }
+    }
+}
+
+
+
